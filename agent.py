@@ -24,9 +24,8 @@ def run_agent(user_message, is_image=False, image_data=None):
     client = Groq(api_key=GROQ_API_KEY)
 
     if is_image:
-        # موديل الرؤية لتحليل الصور (شغال تمام)
-        model_name = "llama-3.3-70b-versatile"
-
+        # موديل الرؤية لتحليل الصور (شغال ومستقر)
+        model_name = "llama-3.2-11b-vision-preview"
         messages = [
             {
                 "role": "user",
@@ -37,8 +36,8 @@ def run_agent(user_message, is_image=False, image_data=None):
             }
         ]
     else:
-        # 🚀 الموديل الجديد المحدث بديل الموديل المحذوف
-        model_name = "llama-3.3-70b-specdec"
+        # 🚀 الموديل الرسمي المستقر والأساسي حالياً في جروق
+        model_name = "llama-3.3-70b-versatile"
         messages = [
             {"role": "system", "content": "أنت مساعد شخصي ذكي جداً وصديق للمستخدم، تتحدث باللغة العربية وبلهجة مصرية ودودة ومحترفة. لديك قدرات خارقة على التحليل والجدولة وتذكر المهام والبحث."},
             {"role": "user", "content": user_message}
@@ -52,4 +51,14 @@ def run_agent(user_message, is_image=False, image_data=None):
         )
         return completion.choices[0].message.content
     except Exception as e:
-        return f"حدث خطأ أثناء معالجة الطلب في Groq: {str(e)}"
+        # خطة بديلة: لو الموديل الكبير حصل فيه أي مشكلة، يحول على الموديل السريع علطول عشان البوت ميردش بإيرور
+        try:
+            fallback_model = "llama3-8b-8192"
+            completion = client.chat.completions.create(
+                model=fallback_model,
+                messages=messages,
+                temperature=0.7,
+            )
+            return completion.choices[0].message.content
+        except:
+            return f"حدث خطأ أثناء معالجة الطلب في Groq: {str(e)}"
