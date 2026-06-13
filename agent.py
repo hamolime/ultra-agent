@@ -25,7 +25,8 @@ def run_agent(user_message, is_image=False, image_data=None):
 
     if is_image:
         # موديل الرؤية لتحليل الصور (شغال تمام)
-        model_name = "llama-3.2-11b-vision-preview"
+        model_name = "llama-3.3-70b-versatile"
+
         messages = [
             {
                 "role": "user",
