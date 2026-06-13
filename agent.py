@@ -16,6 +16,7 @@ def web_search(query: str) -> str:
 
 def run_agent(user_message, is_image=False, image_data=None):
     """تشغيل نموذج Groq وتحليل النصوص والصور"""
+    # قراءة المفتاح جوه الدالة لتفادي أي كراش أثناء التشغيل
     GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
     
     if not GROQ_API_KEY:
@@ -24,7 +25,7 @@ def run_agent(user_message, is_image=False, image_data=None):
     client = Groq(api_key=GROQ_API_KEY)
 
     if is_image:
-        # موديل الرؤية لتحليل الصور (شغال ومستقر)
+        # موديل الرؤية سليم ومستقر وزي الفل ومش هنلمسه
         model_name = "llama-3.2-11b-vision-preview"
         messages = [
             {
@@ -36,7 +37,7 @@ def run_agent(user_message, is_image=False, image_data=None):
             }
         ]
     else:
-        # 🚀 الموديل الرسمي المستقر والأساسي حالياً في جروق
+        # 🚀 الموديل الرسمي المستقر والأساسي حالياً في جروق للنصوص
         model_name = "llama-3.3-70b-versatile"
         messages = [
             {"role": "system", "content": "أنت مساعد شخصي ذكي جداً وصديق للمستخدم، تتحدث باللغة العربية وبلهجة مصرية ودودة ومحترفة. لديك قدرات خارقة على التحليل والجدولة وتذكر المهام والبحث."},
@@ -51,7 +52,7 @@ def run_agent(user_message, is_image=False, image_data=None):
         )
         return completion.choices[0].message.content
     except Exception as e:
-        # خطة بديلة: لو الموديل الكبير حصل فيه أي مشكلة، يحول على الموديل السريع علطول عشان البوت ميردش بإيرور
+        # خطة بديلة سريعة لو الموديل الكبير مهنج عشان البوت ميفصلش
         try:
             fallback_model = "llama3-8b-8192"
             completion = client.chat.completions.create(
