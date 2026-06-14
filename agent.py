@@ -9,6 +9,38 @@ client = Groq(api_key=GROQ_API_KEY) if GROQ_API_KEY else None
 
 chats_memory = {}
 
+# تعريف الأدوات بشكل رسمي لـ Groq ليفهمها السيرفر تلقائياً
+tools_definition = [
+    {
+        "type": "function",
+        "function": {
+            "name": "web_search",
+            "description": "استخدم هذه الأداة للبحث على الإنترنت عن الأخبار الحية، الأسعار اليومية، الطقس، أو التحديثات الجديدة.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "موضوع أو جملة البحث"}
+                },
+                "required": ["query"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "save_memory",
+            "description": "حفظ معلومة شخصية أو حقيقة عن المستخدم في الذاكرة الدائمة (مثل اسمه، عمله، اهتماماته).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "fact": {"type": "string", "description": "المعلومة المراد حفظها"}
+                },
+                "required": ["fact"]
+            }
+        }
+    }
+]
+
 def run_agent(user_chat_id, user_message, is_image=False, image_data=None, scheduler_callback=None):
     if not client: return "خطأ في الاتصال بـ Groq."
 
@@ -20,97 +52,99 @@ def run_agent(user_chat_id, user_message, is_image=False, image_data=None, sched
             {
                 "role": "system", 
                 "content": (
-                    "You are a smart Telegram AI Agent System with an internal JSON Planner layer.\n"
-                    "Speak naturally in Egyptian Arabic slang. Be calm and intelligent.\n\n"
-                    f"LONG-TERM MEMORY:\n{user_long_term}\n\n"
-                    f"CURRENT TIME: {current_time_str}\n\n"
-                    "CRITICAL INSTRUCTION:\n"
-                    "You must respond ONLY in a valid JSON format with three keys: 'thinking', 'tool_name', and 'argument'.\n"
-                    "Available tools:\n"
-                    "- 'web_search': For updates, news, or current live prices (argument is the search query).\n"
-                    "- 'save_memory': To save personal user facts forever (argument is the fact).\n"
-                    "- 'schedule_task': To set reminders (argument is exactly: task_text | YYYY-MM-DD HH:MM:SS).\n"
-                    "- 'none': If no tool is needed and you want to reply directly (put your natural response in the 'thinking' key).\n\n"
-                    "Example response format if a tool is needed:\n"
-                    "{\n  \"thinking\": \"I need to search for gold prices\",\n  \"tool_name\": \"web_search\",\n  \"argument\": \"سعر الذهب اليوم في مصر\"\n}\n"
-                    "Example response if no tool is needed:\n"
-                    "{\n  \"thinking\": \"يا هلا بيك يا ريس، منورني النهاردة!\",\n  \"tool_name\": \"none\",\n  \"argument\": \"\"\n}"
+                    "أنت الآن مساعد ذكي خارق وخاص على تليجرام.\n"
+                    "تحدث بالعامية المصرية الطبيعية بذكاء وهدوء (كأنك صديق حقيقي، بدون رسميات وبدون كتابة رموز أو تفكير داخلي للمستخدم).\n"
+                    f"الذاكرة طويلة المدى للمستخدم:\n{user_long_term}\n"
+                    f"توقيتك الحالي الآن: {current_time_str}\n"
+                    "عندما يطلب المستخدم منبه أو تذكير (مثل: فكرني بعد ساعة)، احسب الوقت بدقة واستدعي أداة الجدولة إن وجدت، وإلا وجهه."
                 )
             }
         ]
 
     try:
-        # --- 1. نظام الرؤية والتذكر الحديدي للصور ---
+        # --- 1. التعامل الحاسم مع الصور وضمان بقائها في الذاكرة ---
         if is_image and image_data:
             vision_model = "llama-3.2-11b-vision-preview"
             vision_messages = [
                 {"role": "user", "content": [
-                    {"type": "text", "text": "اشرح وحلل هذه الصورة بالتفصيل وبالعامية المصرية الذكية:"},
+                    {"type": "text", "text": "اشرح وحلل هذه الصورة بالتفصيل وبالعامية المصرية الذكية وبدون أي كود:"},
                     {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image_data}"}}
                 ]}
             ]
             completion = client.chat.completions.create(model=vision_model, messages=vision_messages, temperature=0.4)
             image_description = completion.choices[0].message.content
             
-            # زرع الوصف في الذاكرة الموحدة كـ "سياق نصي دائم ومؤكد" عشان يفتكره علطول
-            chats_memory[user_chat_id].append({"role": "user", "content": "[المستخدم أرسل صورة ليتم تحليلها وتذكرها]"})
-            chats_memory[user_chat_id].append({"role": "assistant", "content": f"[أنا شفت الصورة دي وشرحها هو]: {image_description}"})
+            # زرع وصف الصورة في الذاكرة النصية عشان يفتكرها في الرسايل الجاية
+            chats_memory[user_chat_id].append({"role": "user", "content": "[أنا أرسلت لك صورة الآن]"})
+            chats_memory[user_chat_id].append({"role": "assistant", "content": f"[أنا رأيت الصورة ووصفها الدقيق هو]: {image_description}"})
             return image_description
 
-        # --- 2. نظام النصوص والفويس نوت مع الـ JSON Planner ---
+        # --- 2. التعامل الذكي مع النصوص والفويس نوت عبر الـ Official Tools ---
         model_name = "llama-3.3-70b-versatile"
+        
+        # حماية من كتابة المستخدم للأوامر اليدوية
+        if "فكرني" in user_message or "جدول" in user_message or "منبه" in user_message:
+            if scheduler_callback:
+                # لو كلام جدولة سريع، بنخليه يروح للـ Agent يحسبه ويصيغه
+                pass
+
         chats_memory[user_chat_id].append({"role": "user", "content": user_message})
 
-        if len(chats_memory[user_chat_id]) > 25:
-            chats_memory[user_chat_id] = [chats_memory[user_chat_id][0]] + chats_memory[user_chat_id][-22:]
+        if len(chats_memory[user_chat_id]) > 20:
+            chats_memory[user_chat_id] = [chats_memory[user_chat_id][0]] + chats_memory[user_chat_id][-18:]
 
-        # إجبار الموديل على الرد بصيغة JSON نظيفة لمنع التداخل والتفكير الخارجي
+        # طلب الرد من جروق مع تمرير الأدوات الرسمية لمنع خروج الـ JSON بره
         completion = client.chat.completions.create(
-            model=model_name, 
-            messages=chats_memory[user_chat_id], 
-            temperature=0.3,
-            response_format={"type": "json_object"}
+            model=model_name,
+            messages=chats_memory[user_chat_id],
+            tools=tools_definition,
+            tool_choice="auto",
+            temperature=0.4
         )
         
-        plan = json.loads(completion.choices[0].message.content)
-        print(f"\n🧠 [INTERNAL JSON PLANNER]:\n{json.dumps(plan, ensure_ascii=False, indent=2)}\n")
+        response_message = completion.choices[0].message
+        tool_calls = response_message.tool_calls
 
-        tool_name = plan.get("tool_name", "none")
-        argument = plan.get("argument", "")
-        direct_reply = plan.get("thinking", "حصلت لخبطة بسيطة.")
-
-        if tool_name != "none" and argument:
-            tool_result = ""
-            if tool_name == "web_search":
-                tool_result = web_search(argument)
-            elif tool_name == "save_memory":
-                key_val = argument.split("is") if "is" in argument else [argument, "true"]
-                tool_result = manage_long_term_memory(user_chat_id, action="save", key=key_val[0].strip(), value=key_val[1].strip())
-            elif tool_name == "schedule_task" and scheduler_callback:
-                try:
-                    parts = argument.split("|")
-                    tool_result = scheduler_callback(parts[0].strip(), parts[1].strip())
-                except: tool_result = "فشلت الجدولة التلقائية."
-
-            if tool_result:
-                # تغذية الموديل بالنتيجة ليصيغ الرد النهائي الطبيعي للشات
-                chats_memory[user_chat_id].append({"role": "assistant", "content": f"[System]: Tool {tool_name} output: {tool_result}"})
-                chats_memory[user_chat_id].append({"role": "user", "content": "بناءً على نتيجة الأداة السابقة، اكتب الرد النهائي الطبيعي للمستخدم بالعامية وبدون أي صيغ أو كود."})
+        # لو جروق قرر يستدعي أداة (تفكير داخلي حقيقي مخفي عن الشات)
+        if tool_calls:
+            chats_memory[user_chat_id].append(response_message)
+            
+            for tool_call in tool_calls:
+                function_name = tool_call.function.name
+                function_args = json.loads(tool_call.function.arguments)
                 
-                final_comp = client.chat.completions.create(model=model_name, messages=chats_memory[user_chat_id], temperature=0.5)
-                final_response = final_comp.choices[0].message.content
+                tool_result = ""
+                if function_name == "web_search":
+                    query = function_args.get("query", "")
+                    print(f"⚡ [Official Tool] Launching Web Search for: {query}")
+                    tool_result = web_search(query)
+                elif function_name == "save_memory":
+                    fact = function_args.get("fact", "")
+                    tool_result = manage_long_term_memory(user_chat_id, action="save", key=fact, value="true")
                 
-                # تنظيف الذاكرة والاحتفاظ بالرد النهائي الصافي فقط
-                chats_memory[user_chat_id] = chats_memory[user_chat_id][:-2]
-                chats_memory[user_chat_id].append({"role": "assistant", "content": final_response})
-                return final_response
+                # إرسال نتيجة الأداة المخفية لجروق ليصيغ الرد النهائي النظيف
+                chats_memory[user_chat_id].append({
+                    "role": "tool",
+                    "tool_call_id": tool_call.id,
+                    "name": function_name,
+                    "content": tool_result
+                })
+            
+            final_completion = client.chat.completions.create(
+                model=model_name,
+                messages=chats_memory[user_chat_id],
+                temperature=0.5
+            )
+            final_reply = final_completion.choices[0].message.content
+            chats_memory[user_chat_id].append({"role": "assistant", "content": final_reply})
+            return final_reply
 
-        # لو الرد مباشر بدون أدوات، بناخد النص الصافي من خانة الـ thinking
-        chats_memory[user_chat_id].append({"role": "assistant", "content": direct_reply})
-        return direct_reply
+        # لو رد عادي بدون أدوات
+        final_reply = response_message.content
+        chats_memory[user_chat_id].append({"role": "assistant", "content": final_reply})
+        return final_reply
 
     except Exception as e:
-        print(f"Error in Agent Logic: {e}")
-        # تصفير أمان عند الكراش المفاجئ
-        if user_chat_id in chats_memory: del chats_memory[user_chat_id]
-        return "عقلي هنج ثانية ونظفت الذاكرة، ابعتلي طلبك تاني كدا يا غالي."
+        print(f"Error in Official Agent Logic: {e}")
+        # حماية: لو حصل كراش مفاجئ بنرجع رد ذكي بدون تصفير كامل للهيستوري لو أمكن
+        return "معلش يا غالي، حصلت لخبطة سريعة في السيرفر، جرب ابعتلي طلبك تاني كدا."
