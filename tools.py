@@ -1,6 +1,7 @@
 import os
 import requests
 import json
+import asyncio
 from groq import Groq
 
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
@@ -9,18 +10,16 @@ client = Groq(api_key=GROQ_API_KEY) if GROQ_API_KEY else None
 LONG_TERM_MEMORY_FILE = "long_term_memory.json"
 
 def web_search(query: str) -> str:
+    """أداة بحث مستقرة ومفتوحة عبر سيرفر جيب الخلاصة بدون حظر"""
     try:
-        url = f"https://api.duckduckgo.com/?q={query}&format=json&no_html=1"
+        # استخدام API مفتوح ومستقر مخصص للـ Agents
+        url = f"https://text.pollinations.ai/search?q={requests.utils.quote(query)}"
         r = requests.get(url, timeout=10)
-        if r.status_code == 200:
-            data = r.json()
-            abstract = data.get("AbstractText", "")
-            if abstract: return f"نتائج البحث: {abstract}"
-            related = data.get("RelatedTopics", [])
-            if related and "Text" in related[0]: return f"نتائج البحث: {related[0]['Text']}"
-        return f"لم أجد نتائج مباشرة لـ {query}"
+        if r.status_code == 200 and r.text:
+            return f"نتائج البحث الحية عن ({query}):\n{r.text[:800]}"
+        return f"لم أتمكن من جلب نتائج حية لـ {query} حالياً."
     except Exception as e:
-        return f"عطل في البحث: {str(e)}"
+        return f"عطل في جلب داتا البحث: {str(e)}"
 
 def manage_long_term_memory(chat_id: int, action: str, key: str = None, value: str = None) -> str:
     chat_id_str = str(chat_id)
@@ -56,18 +55,15 @@ def voice_to_text(ogg_file_path: str) -> str:
         if os.path.exists(mp3_file_path): os.remove(mp3_file_path)
 
 def text_to_voice(text_content: str) -> str:
-    """تحويل النص لصوت كلين ونبرة مظبوطة متوافقة مع تليجرام"""
+    """تحويل النص إلى صوت بشري طبيعي 100% بالعامية عبر مايكروسوفت إيدج"""
     output_path = "response_voice.mp3"
     try:
-        clean_text = text_content.replace("*", "").replace("_", "")
-        # تحسين اللغة والنبرة عبر البرامترات الصحيحة لـ Google TTS المطور
-        url = f"https://translate.google.com/translate_tts?ie=UTF-8&tl=ar-EG&client=tw-ob&q={requests.utils.quote(clean_text)}"
-        headers = {'User-Agent': 'Mozilla/5.0'}
-        r = requests.get(url, headers=headers, stream=True, timeout=10)
-        if r.status_code == 200:
-            with open(output_path, 'wb') as f:
-                for chunk in r.iter_content(chunk_size=1024):
-                    if chunk: f.write(chunk)
-            return output_path
-    except Exception as e: print(f"Error TTS: {e}")
+        import edge_tts
+        clean_text = text_content.replace("*", "").replace("_", "").replace("[", "").replace("]", "")
+        # اختيار صوت ريان الاحترافي والمستقر للغة العربية
+        communicate = edge_tts.Communicate(clean_text, "ar-EG-RyanNeural")
+        asyncio.run(communicate.save(output_path))
+        return output_path
+    except Exception as e:
+        print(f"Error in Microsoft TTS: {e}")
     return ""
