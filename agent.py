@@ -22,8 +22,8 @@ def run_agent(user_chat_id, user_message, is_image=False, image_data=None):
         ]
 
     if is_image:
-        # 👁️ الموديل الرسمي المستقر والأساسي حالياً لتحليل الصور في Groq
-        model_name = "llama-3.2-11b-vision-preview"
+        # 👁️ الموديل الرسمي الجديد (Llama 4) لتحليل الصور في Groq
+        model_name = "meta-llama/llama-4-scout-17b-16e-instruct"
         messages = [
             {
                 "role": "user",
@@ -62,9 +62,9 @@ def run_agent(user_chat_id, user_message, is_image=False, image_data=None):
         return response_text
         
     except Exception as e:
-        # خطة بديلة سريعة لو الموديل الكبير مهنج أو فيه ضغط
+        # خطة بديلة سريعة لو الموديل الكبير مهنج
         try:
-            fallback_model = "llama-3.2-11b-vision-preview" if is_image else "llama3-8b-8192"
+            fallback_model = "meta-llama/llama-4-scout-17b-16e-instruct" if is_image else "llama3-8b-8192"
             completion = client.chat.completions.create(
                 model=fallback_model,
                 messages=messages,
