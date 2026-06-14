@@ -1,24 +1,27 @@
 import os
-import time 
+import time
 import telebot
 import base64
-import threading  
-from datetime import datetime, timedelta
+import threading
+from datetime import datetime
 from telebot import apihelper
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
+# استيراد عقل الـ Agent والأدوات المساعدة
 from agent import run_agent
 from scheduler import schedule_a_task, load_saved_reminders
+from tools import voice_to_text, text_to_voice
 
 apihelper.READ_TIMEOUT = 60
 apihelper.CONNECT_TIMEOUT = 60
 
+# --- السيرفر الوهمي لإبقاء البوت حياً على Railway ---
 class DummyHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
         self.send_header('Content-type', 'text/html')
         self.end_headers()
-        self.wfile.write(b"<h1>Bot is Running Perfectly!</h1>")
+        self.wfile.write(b"<h1>Agent System is Live and Running Perfectly!</h1>")
 
 def run_dummy_server():
     try:
@@ -29,6 +32,7 @@ def run_dummy_server():
 
 threading.Thread(target=run_dummy_server, daemon=True).start()
 
+# إعداد التوكن والـ Admin ID
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN") or os.environ.get("TELEGRAM_BOT_TOKEN")
 ADMIN_CHAT_ID_STR = os.environ.get("ADMIN_CHAT_ID")
 ADMIN_CHAT_ID = int(ADMIN_CHAT_ID_STR) if ADMIN_CHAT_ID_STR else None
@@ -41,7 +45,53 @@ def send_scheduled_msg(chat_id, text):
     except Exception as e:
         print(f"Error sending scheduled message: {e}")
 
-# التعامل مع الصور وتحليلها
+# --- 1. حاسة السمع: التعامل مع الرسائل الصوتية (Records) ---
+@bot.message_handler(content_types=['voice'])
+def handle_voice(message):
+    if not ADMIN_CHAT_ID or message.chat.id != ADMIN_CHAT_ID:
+        bot.reply_to(message, "🔐 عذراً، أنا مساعد شخصي مقفل لصاحب البوت فقط.")
+        return
+
+    bot.send_chat_action(message.chat.id, 'record_audio')
+    
+    try:
+        # تحميل ملف الـ OGG من سيرفرات تليجرام
+        file_info = bot.get_file(message.voice.file_id)
+        downloaded_file = bot.download_file(file_info.file_path)
+        
+        ogg_path = f"voice_{message.message_id}.ogg"
+        with open(ogg_path, 'wb') as f:
+            f.write(downloaded_file)
+            
+        # تحويل الصوت لنص عبر Groq Whisper
+        user_text = voice_to_text(ogg_path)
+        
+        if user_text.startswith("[فشل"):
+            bot.reply_to(message, user_text)
+            return
+            
+        bot.reply_to(message, f"🎤 *سمعتك بتقول:* {user_text}\n\n_جاري التفكير والرد..._", parse_mode="Markdown")
+        
+        # إرسال النص المستنتج لعقل الـ Agent ليخطط ويرد
+        bot.send_chat_action(message.chat.id, 'typing')
+        answer = run_agent(message.chat.id, user_text)
+        
+        # تحويل رد الـ Agent إلى صوت لإرساله للمستخدم
+        bot.send_chat_action(message.chat.id, 'record_audio')
+        voice_response_path = text_to_voice(answer)
+        
+        if voice_response_path and os.path.exists(voice_response_path):
+            with open(voice_response_path, 'rb') as audio:
+                bot.send_voice(message.chat.id, audio, caption="🔊 الرد الصوتي للـ Agent")
+            os.remove(voice_response_path)
+        else:
+            # لو الـ TTS فشل لأي سبب يبعته نص كخطة بديلة وامان للسيستم
+            bot.reply_to(message, answer)
+            
+    except Exception as e:
+        bot.reply_to(message, f"❌ حصلت مشكلة أثناء معالجة الريكورد: {str(e)}")
+
+# --- 2. حاسة البصر: التعامل مع الصور وتحليلها ---
 @bot.message_handler(content_types=['photo'])
 def handle_photo(message):
     if not ADMIN_CHAT_ID or message.chat.id != ADMIN_CHAT_ID:
@@ -49,20 +99,19 @@ def handle_photo(message):
         return
 
     bot.send_chat_action(message.chat.id, 'upload_document')
-    bot.reply_to(message, "⚡ جاري سحب الصورة وتحليلها بعقل Groq Vision الجديد...")
+    bot.reply_to(message, "⚡ جاري سحب الصورة وتحليلها بعقل الـ Agent الخارق الجديد...")
     
     try:
         file_info = bot.get_file(message.photo[-1].file_id)
         downloaded_file = bot.download_file(file_info.file_path)
         base64_image = base64.b64encode(downloaded_file).decode('utf-8')
         
-        # تمرير الـ chat.id للوكيل
         answer = run_agent(message.chat.id, "", is_image=True, image_data=base64_image)
         bot.reply_to(message, answer)
     except Exception as e:
         bot.reply_to(message, f"❌ حصلت مشكلة أثناء معالجة الصورة: {str(e)}")
 
-# التعامل مع النصوص والجدولة الذكية والدردشة بالذاكرة
+# --- 3. التعامل مع النصوص والجدولة والدردشة بالذاكرة ---
 @bot.message_handler(func=lambda message: True)
 def handle_text(message):
     if not ADMIN_CHAT_ID or message.chat.id != ADMIN_CHAT_ID:
@@ -71,7 +120,7 @@ def handle_text(message):
 
     user_input = message.text
 
-    # نظام الجدولة السريع والمطور (يدعم الصيغة القديمة والجديدة)
+    # نظام الجدولة السريع
     if user_input.startswith("جدول:"):
         try:
             parts = user_input.replace("جدول:", "").split("|")
@@ -85,7 +134,7 @@ def handle_text(message):
             bot.reply_to(message, "⚠️ اكتبها بالفورمات ده يا ريس:\n\nجدول: اسم المهمة | YYYY-MM-DD HH:MM:SS")
             return
 
-    # الرد العادي بالذكاء الاصطناعي مع تشغيل الذاكرة
+    # الرد العادي مع تشغيل طبقة اتخاذ القرار والتخطيط والذاكرة
     bot.send_chat_action(message.chat.id, 'typing')
     answer = run_agent(message.chat.id, user_input)
     bot.reply_to(message, answer)
@@ -94,7 +143,7 @@ if __name__ == "__main__":
     if not TELEGRAM_TOKEN:
         print("CRITICAL ERROR: TELEGRAM_TOKEN environment variable not set!")
     else:
-        print("🤖 الـ Agent الخارق شغال بنجاح ومستنيك على تليجرام...")
+        print("🤖 الـ Agent الخارق شغال بنجاح بكامل حواسه وعضلاته ومستنيك...")
         
         if ADMIN_CHAT_ID:
             threading.Thread(
