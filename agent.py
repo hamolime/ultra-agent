@@ -2,47 +2,49 @@ import os
 import requests
 from groq import Groq
 
-def web_search(query: str) -> str:
-    """أداة سريعة للبحث على الإنترنت"""
-    try:
-        url = f"https://html.duckduckgo.com/html/?q={query}"
-        headers = {'User-Agent': 'Mozilla/5.0'}
-        r = requests.get(url, headers=headers)
-        if r.status_code == 200:
-            return f"نتائج البحث عن ({query}): تم العثور على معلومات محدثة وموثوقة متعلقة بطلبك وجاري صياغتها."
-        return "معذرةً، غير قادر على الاتصال بمحرك البحث حالياً."
-    except:
-        return "عطل مؤقت في أداة البحث."
+# قراءة المفتاح بأمان
+GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
 
-def run_agent(user_message, is_image=False, image_data=None):
-    """تشغيل نموذج Groq وتحليل النصوص والصور"""
-    # قراءة المفتاح جوه الدالة لتفادي أي كراش أثناء التشغيل
-    GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
-    
+# قاموس لحفظ ذاكرة المحادثة لكل مستخدم (عشان مينساش)
+chats_memory = {}
+
+def run_agent(user_chat_id, user_message, is_image=False, image_data=None):
+    """تشغيل الـ Agent بذاكرة متكاملة ودعم كامل للصور والنصوص"""
     if not GROQ_API_KEY:
-        return "خطأ: لم يتم العثور على GROQ_API_KEY في الإعدادات الأمان."
+        return "خطأ: لم يتم العثور على GROQ_API_KEY في إعدادات الأمان."
 
     client = Groq(api_key=GROQ_API_KEY)
+    
+    # تهيئة الذاكرة للمستخدم لو مش موجودة
+    if user_chat_id not in chats_memory:
+        chats_memory[user_chat_id] = [
+            {"role": "system", "content": "أنت مساعد شخصي ذكي جداً وصاحب صاحبه، تتحدث باللغة العربية وبلهجة مصرية ودودة جداً ودمك خفيف وچدع. لديك ذاكرة قوية جداً وتتذكر ما قيل في المحادثة، وتستطيع فهم طلبات الجدولة والتذكير ذكياً وتحليل الصور بدقة."}
+        ]
 
     if is_image:
-        # موديل الرؤية سليم ومستقر وزي الفل ومش هنلمسه
-        model_name = "llama-3.2-11b-vision-preview"
+        # الموديل المستقر والمحدث حالياً لتحليل الصور في Groq
+        model_name = "llama-3.2-90b-vision-preview"
         messages = [
             {
                 "role": "user",
                 "content": [
-                    {"type": "text", "text": "اشرحلي الصورة دي بالتفصيل وبالعربي وبذكاء:"},
+                    {"type": "text", "text": "اشرحلي الصورة دي بالتفصيل وبالعربي وبذكاء مصري چدع:"},
                     {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image_data}"}}
                 ]
             }
         ]
     else:
-        # 🚀 الموديل الرسمي المستقر والأساسي حالياً في جروق للنصوص
+        # الموديل المستقر للنصوص
         model_name = "llama-3.3-70b-versatile"
-        messages = [
-            {"role": "system", "content": "أنت مساعد شخصي ذكي جداً وصديق للمستخدم، تتحدث باللغة العربية وبلهجة مصرية ودودة ومحترفة. لديك قدرات خارقة على التحليل والجدولة وتذكر المهام والبحث."},
-            {"role": "user", "content": user_message}
-        ]
+        
+        # إضافة رسالة المستخدم الحالية للذاكرة
+        chats_memory[user_chat_id].append({"role": "user", "content": user_message})
+        
+        # حماية الذاكرة عشان متكبرش وتضرب ليميت (نحتفظ بآخر 15 رسالة مثلاً)
+        if len(chats_memory[user_chat_id]) > 16:
+            chats_memory[user_chat_id] = [chats_memory[user_chat_id][0]] + chats_memory[user_chat_id][-15:]
+            
+        messages = chats_memory[user_chat_id]
 
     try:
         completion = client.chat.completions.create(
@@ -50,11 +52,19 @@ def run_agent(user_message, is_image=False, image_data=None):
             messages=messages,
             temperature=0.7,
         )
-        return completion.choices[0].message.content
+        
+        response_text = completion.choices[0].message.content
+        
+        # حفظ رد البوت في الذاكرة لو كانت محادثة نصية
+        if not is_image:
+            chats_memory[user_chat_id].append({"role": "assistant", "content": response_text})
+            
+        return response_text
+        
     except Exception as e:
-        # خطة بديلة سريعة لو الموديل الكبير مهنج عشان البوت ميفصلش
+        # خطة بديلة سريعة لو الموديل الكبير مهنج
         try:
-            fallback_model = "llama3-8b-8192"
+            fallback_model = "llama-3.3-70b-specdec" if is_image else "llama3-8b-8192"
             completion = client.chat.completions.create(
                 model=fallback_model,
                 messages=messages,
