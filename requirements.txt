@@ -1,4 +1,6 @@
-pyTelegramBotAPI
-groq
+pyTelegramBotAPI==4.12.0
+groq==0.9.0
+requests==2.31.0
+pydantic==2.6.1
+pydub==0.25.1
 apscheduler
-requests
