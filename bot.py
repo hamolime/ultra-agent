@@ -7,7 +7,6 @@ from datetime import datetime
 from telebot import apihelper
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
-# استيراد عقل الـ Agent والأدوات المساعدة
 from agent import run_agent
 from scheduler import schedule_a_task, load_saved_reminders
 from tools import voice_to_text, text_to_voice
@@ -15,24 +14,21 @@ from tools import voice_to_text, text_to_voice
 apihelper.READ_TIMEOUT = 60
 apihelper.CONNECT_TIMEOUT = 60
 
-# --- السيرفر الوهمي لإبقاء البوت حياً على Railway ---
 class DummyHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
         self.send_header('Content-type', 'text/html')
         self.end_headers()
-        self.wfile.write(b"<h1>Agent System is Live and Running Perfectly!</h1>")
+        self.wfile.write(b"<h1>Agent System Pro is Live!</h1>")
 
 def run_dummy_server():
     try:
         server = HTTPServer(('0.0.0.0', 7860), DummyHandler)
         server.serve_forever()
-    except Exception as e:
-        print(f"Error in dummy server: {e}")
+    except Exception as e: print(f"Server error: {e}")
 
 threading.Thread(target=run_dummy_server, daemon=True).start()
 
-# إعداد التوكن والـ Admin ID
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN") or os.environ.get("TELEGRAM_BOT_TOKEN")
 ADMIN_CHAT_ID_STR = os.environ.get("ADMIN_CHAT_ID")
 ADMIN_CHAT_ID = int(ADMIN_CHAT_ID_STR) if ADMIN_CHAT_ID_STR else None
@@ -40,120 +36,77 @@ ADMIN_CHAT_ID = int(ADMIN_CHAT_ID_STR) if ADMIN_CHAT_ID_STR else None
 bot = telebot.TeleBot(TELEGRAM_TOKEN)
 
 def send_scheduled_msg(chat_id, text):
-    try:
-        bot.send_message(chat_id, text)
-    except Exception as e:
-        print(f"Error sending scheduled message: {e}")
+    try: bot.send_message(chat_id, text)
+    except Exception as e: print(f"Notification error: {e}")
 
-# --- 1. حاسة السمع: التعامل مع الرسائل الصوتية (Records) ---
+# دالة وسيطة يطلبها الـ Agent لما يعوز يجدول بنفسه تلقائياً
+def make_schedule_callback(chat_id):
+    def callback(task_text, time_str):
+        return schedule_a_task(task_text, time_str, send_notification_func=send_scheduled_msg, chat_id=chat_id)
+    return callback
+
+# --- 1. معالجة الفويس نوت ---
 @bot.message_handler(content_types=['voice'])
 def handle_voice(message):
-    if not ADMIN_CHAT_ID or message.chat.id != ADMIN_CHAT_ID:
-        bot.reply_to(message, "🔐 عذراً، أنا مساعد شخصي مقفل لصاحب البوت فقط.")
-        return
-
+    if not ADMIN_CHAT_ID or message.chat.id != ADMIN_CHAT_ID: return
     bot.send_chat_action(message.chat.id, 'record_audio')
-    
     try:
-        # تحميل ملف الـ OGG من سيرفرات تليجرام
         file_info = bot.get_file(message.voice.file_id)
         downloaded_file = bot.download_file(file_info.file_path)
-        
         ogg_path = f"voice_{message.message_id}.ogg"
-        with open(ogg_path, 'wb') as f:
-            f.write(downloaded_file)
+        with open(ogg_path, 'wb') as f: f.write(downloaded_file)
             
-        # تحويل الصوت لنص عبر Groq Whisper
         user_text = voice_to_text(ogg_path)
-        
         if user_text.startswith("[فشل"):
             bot.reply_to(message, user_text)
             return
             
-        bot.reply_to(message, f"🎤 *سمعتك بتقول:* {user_text}\n\n_جاري التفكير والرد..._", parse_mode="Markdown")
+        bot.reply_to(message, f"🎤 *سمعتك:* {user_text}", parse_mode="Markdown")
         
-        # إرسال النص المستنتج لعقل الـ Agent ليخطط ويرد
         bot.send_chat_action(message.chat.id, 'typing')
-        answer = run_agent(message.chat.id, user_text)
+        # تمرير الـ callback للجدولة التلقائية من الفويس
+        answer = run_agent(message.chat.id, user_text, scheduler_callback=make_schedule_callback(message.chat.id))
         
-        # تحويل رد الـ Agent إلى صوت لإرساله للمستخدم
         bot.send_chat_action(message.chat.id, 'record_audio')
-        voice_response_path = text_to_voice(answer)
-        
-        if voice_response_path and os.path.exists(voice_response_path):
-            with open(voice_response_path, 'rb') as audio:
-                bot.send_voice(message.chat.id, audio, caption="🔊 الرد الصوتي للـ Agent")
-            os.remove(voice_response_path)
+        voice_path = text_to_voice(answer)
+        if voice_path and os.path.exists(voice_path):
+            with open(voice_path, 'rb') as audio:
+                bot.send_voice(message.chat.id, audio)
+            os.remove(voice_path)
         else:
-            # لو الـ TTS فشل لأي سبب يبعته نص كخطة بديلة وامان للسيستم
             bot.reply_to(message, answer)
-            
-    except Exception as e:
-        bot.reply_to(message, f"❌ حصلت مشكلة أثناء معالجة الريكورد: {str(e)}")
+    except Exception as e: bot.reply_to(message, f"❌ خطأ صوتي: {str(e)}")
 
-# --- 2. حاسة البصر: التعامل مع الصور وتحليلها ---
+# --- 2. معالجة الصور ---
 @bot.message_handler(content_types=['photo'])
 def handle_photo(message):
-    if not ADMIN_CHAT_ID or message.chat.id != ADMIN_CHAT_ID:
-        bot.reply_to(message, "🔐 عذراً، أنا مساعد شخصي مقفل لصاحب البوت فقط.")
-        return
-
+    if not ADMIN_CHAT_ID or message.chat.id != ADMIN_CHAT_ID: return
     bot.send_chat_action(message.chat.id, 'upload_document')
-    bot.reply_to(message, "⚡ جاري سحب الصورة وتحليلها بعقل الـ Agent الخارق الجديد...")
-    
     try:
         file_info = bot.get_file(message.photo[-1].file_id)
         downloaded_file = bot.download_file(file_info.file_path)
         base64_image = base64.b64encode(downloaded_file).decode('utf-8')
         
+        # تشغيل عقل الـ Agent مع حفظ الصورة بالذاكرة الموحدة
         answer = run_agent(message.chat.id, "", is_image=True, image_data=base64_image)
         bot.reply_to(message, answer)
-    except Exception as e:
-        bot.reply_to(message, f"❌ حصلت مشكلة أثناء معالجة الصورة: {str(e)}")
+    except Exception as e: bot.reply_to(message, f"❌ خطأ صور: {str(e)}")
 
-# --- 3. التعامل مع النصوص والجدولة والدردشة بالذاكرة ---
+# --- 3. معالجة النصوص والجدولة الذكية بدون فورمات ---
 @bot.message_handler(func=lambda message: True)
 def handle_text(message):
-    if not ADMIN_CHAT_ID or message.chat.id != ADMIN_CHAT_ID:
-        bot.reply_to(message, "🔐 عذراً، أنا مساعد شخصي مقفل لصاحب البوت فقط.")
-        return
-
-    user_input = message.text
-
-    # نظام الجدولة السريع
-    if user_input.startswith("جدول:"):
-        try:
-            parts = user_input.replace("جدول:", "").split("|")
-            task = parts[0].strip()
-            time_str = parts[1].strip()
-            
-            res = schedule_a_task(task, time_str, send_notification_func=send_scheduled_msg, chat_id=message.chat.id)
-            bot.reply_to(message, res)
-            return
-        except:
-            bot.reply_to(message, "⚠️ اكتبها بالفورمات ده يا ريس:\n\nجدول: اسم المهمة | YYYY-MM-DD HH:MM:SS")
-            return
-
-    # الرد العادي مع تشغيل طبقة اتخاذ القرار والتخطيط والذاكرة
+    if not ADMIN_CHAT_ID or message.chat.id != ADMIN_CHAT_ID: return
     bot.send_chat_action(message.chat.id, 'typing')
-    answer = run_agent(message.chat.id, user_input)
+    
+    # الـ Agent هو من يقرر الجدولة والبحث بنفسه الآن بناء على النص الطبيعي
+    answer = run_agent(message.chat.id, message.text, scheduler_callback=make_schedule_callback(message.chat.id))
     bot.reply_to(message, answer)
 
 if __name__ == "__main__":
-    if not TELEGRAM_TOKEN:
-        print("CRITICAL ERROR: TELEGRAM_TOKEN environment variable not set!")
-    else:
-        print("🤖 الـ Agent الخارق شغال بنجاح بكامل حواسه وعضلاته ومستنيك...")
-        
+    if TELEGRAM_TOKEN:
+        print("🤖 السيستم الجديد جاهز ومستنيك بالفيس والصور والجدولة الذكية...")
         if ADMIN_CHAT_ID:
-            threading.Thread(
-                target=load_saved_reminders, 
-                args=(send_scheduled_msg, ADMIN_CHAT_ID), 
-                daemon=True
-            ).start()
-            
+            threading.Thread(target=load_saved_reminders, args=(send_scheduled_msg, ADMIN_CHAT_ID), daemon=True).start()
         while True:
-            try:
-                bot.infinity_polling(timeout=40, long_polling_timeout=20)
-            except Exception as e:
-                time.sleep(5)
+            try: bot.infinity_polling(timeout=40, long_polling_timeout=20)
+            except: time.sleep(5)
