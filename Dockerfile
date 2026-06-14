@@ -1,11 +1,21 @@
-FROM python:3.9
+FROM python:3.10-slim
 
-WORKDIR /code
+# تثبيت الأدوات الأساسية للنظام ومعالجة الصوت ffmpeg
+RUN apt-get update && apt-get install -y \
+    ffmpeg \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
 
-COPY ./requirements.txt /code/requirements.txt
+WORKDIR /app
 
-RUN pip install --no-cache-dir --upgrade -r /code/requirements.txt
+# نسخ ملف المكتبات وتثبيتها
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
 
+# نسخ باقي ملفات المشروع
 COPY . .
+
+# المنفذ اللي هيشتغل عليه السيرفر الوهمي لـ Railway
+EXPOSE 7860
 
 CMD ["python", "bot.py"]
