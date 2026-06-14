@@ -22,8 +22,8 @@ def run_agent(user_chat_id, user_message, is_image=False, image_data=None):
         ]
 
     if is_image:
-        # الموديل المستقر والمحدث حالياً لتحليل الصور في Groq
-        model_name = "llama-3.2-90b-vision-preview"
+        # 👁️ الموديل الرسمي المستقر والأساسي حالياً لتحليل الصور في Groq
+        model_name = "llama-3.2-11b-vision-preview"
         messages = [
             {
                 "role": "user",
@@ -34,13 +34,13 @@ def run_agent(user_chat_id, user_message, is_image=False, image_data=None):
             }
         ]
     else:
-        # الموديل المستقر للنصوص
+        # 📝 الموديل المستقر المعتمد للنصوص
         model_name = "llama-3.3-70b-versatile"
         
         # إضافة رسالة المستخدم الحالية للذاكرة
         chats_memory[user_chat_id].append({"role": "user", "content": user_message})
         
-        # حماية الذاكرة عشان متكبرش وتضرب ليميت (نحتفظ بآخر 15 رسالة مثلاً)
+        # حماية الذاكرة عشان متكبرش وتضرب ليميت
         if len(chats_memory[user_chat_id]) > 16:
             chats_memory[user_chat_id] = [chats_memory[user_chat_id][0]] + chats_memory[user_chat_id][-15:]
             
@@ -62,9 +62,9 @@ def run_agent(user_chat_id, user_message, is_image=False, image_data=None):
         return response_text
         
     except Exception as e:
-        # خطة بديلة سريعة لو الموديل الكبير مهنج
+        # خطة بديلة سريعة لو الموديل الكبير مهنج أو فيه ضغط
         try:
-            fallback_model = "llama-3.3-70b-specdec" if is_image else "llama3-8b-8192"
+            fallback_model = "llama-3.2-11b-vision-preview" if is_image else "llama3-8b-8192"
             completion = client.chat.completions.create(
                 model=fallback_model,
                 messages=messages,
