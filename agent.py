@@ -9,17 +9,16 @@ client = Groq(api_key=GROQ_API_KEY) if GROQ_API_KEY else None
 
 chats_memory = {}
 
-# تعريف الأدوات بشكل رسمي لـ Groq ليفهمها السيرفر تلقائياً
 tools_definition = [
     {
         "type": "function",
         "function": {
             "name": "web_search",
-            "description": "استخدم هذه الأداة للبحث على الإنترنت عن الأخبار الحية، الأسعار اليومية، الطقس، أو التحديثات الجديدة.",
+            "description": "ابحث على الإنترنت عن الأخبار الحية، الأسعار اليومية (مثل سعر الذهب أو العربيات)، أو التحديثات الجديدة.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "query": {"type": "string", "description": "موضوع أو جملة البحث"}
+                    "query": {"type": "string", "description": "جملة البحث الصافية"}
                 },
                 "required": ["query"]
             }
@@ -29,7 +28,7 @@ tools_definition = [
         "type": "function",
         "function": {
             "name": "save_memory",
-            "description": "حفظ معلومة شخصية أو حقيقة عن المستخدم في الذاكرة الدائمة (مثل اسمه، عمله، اهتماماته).",
+            "description": "حفظ حقيقة مهمة عن المستخدم في الذاكرة الدائمة.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -52,48 +51,38 @@ def run_agent(user_chat_id, user_message, is_image=False, image_data=None, sched
             {
                 "role": "system", 
                 "content": (
-                    "أنت الآن مساعد ذكي خارق وخاص على تليجرام.\n"
-                    "تحدث بالعامية المصرية الطبيعية بذكاء وهدوء (كأنك صديق حقيقي، بدون رسميات وبدون كتابة رموز أو تفكير داخلي للمستخدم).\n"
-                    f"الذاكرة طويلة المدى للمستخدم:\n{user_long_term}\n"
-                    f"توقيتك الحالي الآن: {current_time_str}\n"
-                    "عندما يطلب المستخدم منبه أو تذكير (مثل: فكرني بعد ساعة)، احسب الوقت بدقة واستدعي أداة الجدولة إن وجدت، وإلا وجهه."
+                    "أنت الآن جارفيس: مساعد ذكي خارق على تليجرام.\n"
+                    "تحدث بالعامية المصرية الطبيعية كأنك صديق حقيقي وبدون رسميات.\n"
+                    f"الذاكرة طويلة المدى:\n{user_long_term}\n"
+                    f"التوقيت الحالي: {current_time_str}"
                 )
             }
         ]
 
     try:
-        # --- 1. التعامل الحاسم مع الصور وضمان بقائها في الذاكرة ---
+        # --- 1. معالجة الصور وضمان الحفظ في السياق النصي ---
         if is_image and image_data:
             vision_model = "llama-3.2-11b-vision-preview"
             vision_messages = [
                 {"role": "user", "content": [
-                    {"type": "text", "text": "اشرح وحلل هذه الصورة بالتفصيل وبالعامية المصرية الذكية وبدون أي كود:"},
+                    {"type": "text", "text": "اشرح هذه الصورة بالتفصيل وبالعامية المصرية وبدون أي كود:"},
                     {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image_data}"}}
                 ]}
             ]
             completion = client.chat.completions.create(model=vision_model, messages=vision_messages, temperature=0.4)
             image_description = completion.choices[0].message.content
             
-            # زرع وصف الصورة في الذاكرة النصية عشان يفتكرها في الرسايل الجاية
-            chats_memory[user_chat_id].append({"role": "user", "content": "[أنا أرسلت لك صورة الآن]"})
-            chats_memory[user_chat_id].append({"role": "assistant", "content": f"[أنا رأيت الصورة ووصفها الدقيق هو]: {image_description}"})
+            chats_memory[user_chat_id].append({"role": "user", "content": "[أرسلت لك صورة]"})
+            chats_memory[user_chat_id].append({"role": "assistant", "content": f"[أنا رأيت الصورة ووصفها هو]: {image_description}"})
             return image_description
 
-        # --- 2. التعامل الذكي مع النصوص والفويس نوت عبر الـ Official Tools ---
+        # --- 2. معالجة النصوص والفويس نوت ---
         model_name = "llama-3.3-70b-versatile"
-        
-        # حماية من كتابة المستخدم للأوامر اليدوية
-        if "فكرني" in user_message or "جدول" in user_message or "منبه" in user_message:
-            if scheduler_callback:
-                # لو كلام جدولة سريع، بنخليه يروح للـ Agent يحسبه ويصيغه
-                pass
-
         chats_memory[user_chat_id].append({"role": "user", "content": user_message})
 
         if len(chats_memory[user_chat_id]) > 20:
             chats_memory[user_chat_id] = [chats_memory[user_chat_id][0]] + chats_memory[user_chat_id][-18:]
 
-        # طلب الرد من جروق مع تمرير الأدوات الرسمية لمنع خروج الـ JSON بره
         completion = client.chat.completions.create(
             model=model_name,
             messages=chats_memory[user_chat_id],
@@ -105,24 +94,27 @@ def run_agent(user_chat_id, user_message, is_image=False, image_data=None, sched
         response_message = completion.choices[0].message
         tool_calls = response_message.tool_calls
 
-        # لو جروق قرر يستدعي أداة (تفكير داخلي حقيقي مخفي عن الشات)
         if tool_calls:
             chats_memory[user_chat_id].append(response_message)
             
             for tool_call in tool_calls:
                 function_name = tool_call.function.name
-                function_args = json.loads(tool_call.function.arguments)
+                try:
+                    function_args = json.loads(tool_call.function.arguments)
+                except:
+                    function_args = {}
                 
                 tool_result = ""
                 if function_name == "web_search":
-                    query = function_args.get("query", "")
-                    print(f"⚡ [Official Tool] Launching Web Search for: {query}")
+                    query = function_args.get("query", argument if 'argument' in locals() else user_message)
                     tool_result = web_search(query)
                 elif function_name == "save_memory":
                     fact = function_args.get("fact", "")
                     tool_result = manage_long_term_memory(user_chat_id, action="save", key=fact, value="true")
                 
-                # إرسال نتيجة الأداة المخفية لجروق ليصيغ الرد النهائي النظيف
+                if not tool_result: 
+                    tool_result = "فشل تشغيل الأداة، جاوب من المعرفة العامة."
+
                 chats_memory[user_chat_id].append({
                     "role": "tool",
                     "tool_call_id": tool_call.id,
@@ -133,18 +125,25 @@ def run_agent(user_chat_id, user_message, is_image=False, image_data=None, sched
             final_completion = client.chat.completions.create(
                 model=model_name,
                 messages=chats_memory[user_chat_id],
-                temperature=0.5
+                temperature=0.4
             )
             final_reply = final_completion.choices[0].message.content
             chats_memory[user_chat_id].append({"role": "assistant", "content": final_reply})
             return final_reply
 
-        # لو رد عادي بدون أدوات
         final_reply = response_message.content
         chats_memory[user_chat_id].append({"role": "assistant", "content": final_reply})
         return final_reply
 
     except Exception as e:
-        print(f"Error in Official Agent Logic: {e}")
-        # حماية: لو حصل كراش مفاجئ بنرجع رد ذكي بدون تصفير كامل للهيستوري لو أمكن
-        return "معلش يا غالي، حصلت لخبطة سريعة في السيرفر، جرب ابعتلي طلبك تاني كدا."
+        print(f"Error caught and bypassed: {e}")
+        # خطة بديلة فورية (Fallback) عشان البوت ميسكتش أبداً لو الأدوات علقت
+        try:
+            fallback_comp = client.chat.completions.create(
+                model="llama-3.3-70b-versatile",
+                messages=[{"role": "user", "content": f"رد باختصار وعامية مصرية على: {user_message}"}],
+                temperature=0.4
+            )
+            return fallback_comp.choices[0].message.content
+        except:
+            return "السيرفر مضغوط ثواني يا غالي، جرب تبعت رسالتك تاني وهرد فوراً."
