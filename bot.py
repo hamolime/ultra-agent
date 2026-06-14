@@ -39,13 +39,12 @@ def send_scheduled_msg(chat_id, text):
     try: bot.send_message(chat_id, text)
     except Exception as e: print(f"Notification error: {e}")
 
-# دالة وسيطة يطلبها الـ Agent لما يعوز يجدول بنفسه تلقائياً
 def make_schedule_callback(chat_id):
     def callback(task_text, time_str):
         return schedule_a_task(task_text, time_str, send_notification_func=send_scheduled_msg, chat_id=chat_id)
     return callback
 
-# --- 1. معالجة الفويس نوت ---
+# --- 1. معالجة الفويس نوت الحقيقية ---
 @bot.message_handler(content_types=['voice'])
 def handle_voice(message):
     if not ADMIN_CHAT_ID or message.chat.id != ADMIN_CHAT_ID: return
@@ -64,9 +63,9 @@ def handle_voice(message):
         bot.reply_to(message, f"🎤 *سمعتك:* {user_text}", parse_mode="Markdown")
         
         bot.send_chat_action(message.chat.id, 'typing')
-        # تمرير الـ callback للجدولة التلقائية من الفويس
         answer = run_agent(message.chat.id, user_text, scheduler_callback=make_schedule_callback(message.chat.id))
         
+        # تشغيل الفويس غصب عنه بناء على رد الـ Agent الحقيقي
         bot.send_chat_action(message.chat.id, 'record_audio')
         voice_path = text_to_voice(answer)
         if voice_path and os.path.exists(voice_path):
@@ -75,9 +74,10 @@ def handle_voice(message):
             os.remove(voice_path)
         else:
             bot.reply_to(message, answer)
-    except Exception as e: bot.reply_to(message, f"❌ خطأ صوتي: {str(e)}")
+    except Exception as e: 
+        bot.reply_to(message, f"❌ خطأ سيرفر الفويس: {str(e)}")
 
-# --- 2. معالجة الصور ---
+# --- 2. معالجة الصور الحقيقية ---
 @bot.message_handler(content_types=['photo'])
 def handle_photo(message):
     if not ADMIN_CHAT_ID or message.chat.id != ADMIN_CHAT_ID: return
@@ -87,24 +87,23 @@ def handle_photo(message):
         downloaded_file = bot.download_file(file_info.file_path)
         base64_image = base64.b64encode(downloaded_file).decode('utf-8')
         
-        # تشغيل عقل الـ Agent مع حفظ الصورة بالذاكرة الموحدة
         answer = run_agent(message.chat.id, "", is_image=True, image_data=base64_image)
         bot.reply_to(message, answer)
-    except Exception as e: bot.reply_to(message, f"❌ خطأ صور: {str(e)}")
+    except Exception as e: 
+        bot.reply_to(message, f"❌ خطأ سيرفر الصور: {str(e)}")
 
-# --- 3. معالجة النصوص والجدولة الذكية بدون فورمات ---
+# --- 3. معالجة النصوص الحقيقية ---
 @bot.message_handler(func=lambda message: True)
 def handle_text(message):
     if not ADMIN_CHAT_ID or message.chat.id != ADMIN_CHAT_ID: return
     bot.send_chat_action(message.chat.id, 'typing')
     
-    # الـ Agent هو من يقرر الجدولة والبحث بنفسه الآن بناء على النص الطبيعي
     answer = run_agent(message.chat.id, message.text, scheduler_callback=make_schedule_callback(message.chat.id))
     bot.reply_to(message, answer)
 
 if __name__ == "__main__":
     if TELEGRAM_TOKEN:
-        print("🤖 السيستم الجديد جاهز ومستنيك بالفيس والصور والجدولة الذكية...")
+        print("🤖 تم تطهير البوت والـ Agent الحديدي جاهز...")
         if ADMIN_CHAT_ID:
             threading.Thread(target=load_saved_reminders, args=(send_scheduled_msg, ADMIN_CHAT_ID), daemon=True).start()
         while True:
